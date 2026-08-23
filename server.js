@@ -181,6 +181,80 @@ app.post('/api/upload', upload.array('files', 20), async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// GALLERIA (elenco e visualizzazione dei ricordi già caricati, sola lettura)
+// ---------------------------------------------------------------------------
+
+// Elenco dei file: solo metadati, niente contenuto (veloce)
+app.get('/api/photos', async (req, res) => {
+  try {
+    if (!currentRefreshToken) {
+      return res.status(503).json({
+        error: 'Il servizio non è ancora collegato a Google Drive. Contattare gli sposi.',
+      });
+    }
+
+    const providedToken = req.get('X-Wedding-Token') || req.query.token;
+    if (WEDDING_TOKEN && providedToken !== WEDDING_TOKEN) {
+      return res.status(403).json({ error: 'Link non valido.' });
+    }
+
+    const q = GOOGLE_DRIVE_FOLDER_ID
+      ? `'${GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed = false`
+      : `trashed = false`;
+
+    const result = await drive.files.list({
+      q,
+      orderBy: 'createdTime desc',
+      pageSize: 300,
+      fields: 'files(id, name, mimeType, createdTime)',
+    });
+
+    const files = (result.data.files || []).map((f) => ({
+      id: f.id,
+      name: f.name,
+      isVideo: (f.mimeType || '').startsWith('video/'),
+      createdTime: f.createdTime,
+    }));
+
+    res.json({ files });
+  } catch (err) {
+    console.error('Errore galleria:', err);
+    res.status(500).json({ error: 'Errore nel caricamento della galleria.' });
+  }
+});
+
+// Contenuto di un singolo file (usato sia per le anteprime sia per la vista
+// a schermo intero): il backend fa da tramite verso Drive, così le foto
+// restano private (visibili solo con il WEDDING_TOKEN) senza dover rendere
+// pubblica la cartella su Google Drive.
+app.get('/api/photos/:id/media', async (req, res) => {
+  try {
+    if (!currentRefreshToken) return res.status(503).end();
+
+    const providedToken = req.query.token;
+    if (WEDDING_TOKEN && providedToken !== WEDDING_TOKEN) return res.status(403).end();
+
+    const meta = await drive.files.get({ fileId: req.params.id, fields: 'mimeType' });
+    res.setHeader('Content-Type', meta.data.mimeType || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+
+    const driveRes = await drive.files.get(
+      { fileId: req.params.id, alt: 'media' },
+      { responseType: 'stream' }
+    );
+    driveRes.data
+      .on('error', (err) => {
+        console.error('Errore stream media:', err);
+        res.end();
+      })
+      .pipe(res);
+  } catch (err) {
+    console.error('Errore media:', err);
+    res.status(404).end();
+  }
+});
+
 app.get('/health', (req, res) => {
   res.json({ ok: true, driveCollegato: !!currentRefreshToken });
 });
