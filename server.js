@@ -224,10 +224,33 @@ app.get('/api/photos', async (req, res) => {
   }
 });
 
-// Contenuto di un singolo file (usato sia per le anteprime sia per la vista
-// a schermo intero): il backend fa da tramite verso Drive, così le foto
-// restano private (visibili solo con il WEDDING_TOKEN) senza dover rendere
-// pubblica la cartella su Google Drive.
+// Vera miniatura del file (leggera): reindirizza direttamente al server di
+// Google Drive che la genera già in automatico, senza far passare i byte
+// della foto intera dal nostro backend. Molto più veloce per la griglia.
+app.get('/api/photos/:id/thumbnail', async (req, res) => {
+  try {
+    if (!currentRefreshToken) return res.status(503).end();
+
+    const providedToken = req.query.token;
+    if (WEDDING_TOKEN && providedToken !== WEDDING_TOKEN) return res.status(403).end();
+
+    const meta = await drive.files.get({ fileId: req.params.id, fields: 'thumbnailLink' });
+    if (!meta.data.thumbnailLink) return res.status(404).end();
+
+    // Chiediamo una versione un po' più grande della miniatura predefinita
+    // (Google la fornisce di default piccola, ~220px)
+    const url = meta.data.thumbnailLink.replace(/=s\d+$/, '=s400');
+    res.redirect(url);
+  } catch (err) {
+    console.error('Errore thumbnail:', err);
+    res.status(404).end();
+  }
+});
+
+// Contenuto di un singolo file a piena risoluzione (usato solo per la vista
+// a schermo intero, aperta una foto alla volta): il backend fa da tramite
+// verso Drive, così le foto restano private (visibili solo con il
+// WEDDING_TOKEN) senza dover rendere pubblica la cartella su Google Drive.
 app.get('/api/photos/:id/media', async (req, res) => {
   try {
     if (!currentRefreshToken) return res.status(503).end();
