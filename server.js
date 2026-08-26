@@ -207,7 +207,7 @@ app.get('/api/photos', async (req, res) => {
       q,
       orderBy: 'createdTime desc',
       pageSize: 60,
-      fields: 'files(id, name, mimeType, createdTime)',
+      fields: 'files(id, name, mimeType, createdTime, thumbnailLink)',
     });
 
     const files = (result.data.files || []).map((f) => ({
@@ -215,35 +215,15 @@ app.get('/api/photos', async (req, res) => {
       name: f.name,
       isVideo: (f.mimeType || '').startsWith('video/'),
       createdTime: f.createdTime,
+      // Miniatura già pronta usata da Drive, ridimensionata un po' più
+      // grande del default (~220px) per stare bene nella griglia
+      thumb: f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s400') : null,
     }));
 
     res.json({ files });
   } catch (err) {
     console.error('Errore galleria:', err);
     res.status(500).json({ error: 'Errore nel caricamento della galleria.' });
-  }
-});
-
-// Vera miniatura del file (leggera): reindirizza direttamente al server di
-// Google Drive che la genera già in automatico, senza far passare i byte
-// della foto intera dal nostro backend. Molto più veloce per la griglia.
-app.get('/api/photos/:id/thumbnail', async (req, res) => {
-  try {
-    if (!currentRefreshToken) return res.status(503).end();
-
-    const providedToken = req.query.token;
-    if (WEDDING_TOKEN && providedToken !== WEDDING_TOKEN) return res.status(403).end();
-
-    const meta = await drive.files.get({ fileId: req.params.id, fields: 'thumbnailLink' });
-    if (!meta.data.thumbnailLink) return res.status(404).end();
-
-    // Chiediamo una versione un po' più grande della miniatura predefinita
-    // (Google la fornisce di default piccola, ~220px)
-    const url = meta.data.thumbnailLink.replace(/=s\d+$/, '=s400');
-    res.redirect(url);
-  } catch (err) {
-    console.error('Errore thumbnail:', err);
-    res.status(404).end();
   }
 });
 
