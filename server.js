@@ -238,14 +238,36 @@ app.get('/api/photos/:id/media', async (req, res) => {
     const providedToken = req.query.token;
     if (WEDDING_TOKEN && providedToken !== WEDDING_TOKEN) return res.status(403).end();
 
-    const meta = await drive.files.get({ fileId: req.params.id, fields: 'mimeType' });
-    res.setHeader('Content-Type', meta.data.mimeType || 'application/octet-stream');
-    res.setHeader('Cache-Control', 'private, max-age=3600');
+    const meta = await drive.files.get({ fileId: req.params.id, fields: 'mimeType, size' });
+    const mimeType = meta.data.mimeType || 'application/octet-stream';
+    const totalSize = parseInt(meta.data.size, 10) || undefined;
 
-    const driveRes = await drive.files.get(
-      { fileId: req.params.id, alt: 'media' },
-      { responseType: 'stream' }
-    );
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    const requestOptions = { fileId: req.params.id, alt: 'media' };
+    const fetchOptions = { responseType: 'stream' };
+
+    // I video hanno bisogno che il server risponda "a blocchi" (Range),
+    // altrimenti molti browser (soprattutto su iPhone) si rifiutano di
+    // riprodurli tramite un tramite come il nostro backend.
+    const range = req.headers.range;
+    if (range && totalSize) {
+      const match = range.match(/bytes=(\d+)-(\d*)/);
+      if (match) {
+        const start = parseInt(match[1], 10);
+        const end = match[2] ? parseInt(match[2], 10) : totalSize - 1;
+        fetchOptions.headers = { Range: `bytes=${start}-${end}` };
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+        res.setHeader('Content-Length', end - start + 1);
+      }
+    } else if (totalSize) {
+      res.setHeader('Content-Length', totalSize);
+    }
+
+    const driveRes = await drive.files.get(requestOptions, fetchOptions);
     driveRes.data
       .on('error', (err) => {
         console.error('Errore stream media:', err);
