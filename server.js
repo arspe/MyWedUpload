@@ -206,7 +206,7 @@ app.get('/api/photos', async (req, res) => {
     const result = await drive.files.list({
       q,
       orderBy: 'createdTime desc',
-      pageSize: 300,
+      pageSize: 60,
       fields: 'files(id, name, mimeType, createdTime)',
     });
 
