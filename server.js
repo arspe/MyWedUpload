@@ -174,6 +174,7 @@ app.post('/api/upload', upload.array('files', 20), async (req, res) => {
       uploaded.push(driveRes.data.name);
     }
 
+    photosCache = { data: null, expiresAt: 0 };
     res.json({ success: true, count: uploaded.length, files: uploaded });
   } catch (err) {
     console.error('Errore upload:', err);
@@ -184,6 +185,12 @@ app.post('/api/upload', upload.array('files', 20), async (req, res) => {
 // ---------------------------------------------------------------------------
 // GALLERIA (elenco e visualizzazione dei ricordi già caricati, sola lettura)
 // ---------------------------------------------------------------------------
+
+// Piccola cache in memoria: se più invitati aprono la galleria a pochi
+// secondi di distanza, evitiamo di richiedere di nuovo tutto a Google Drive
+// ogni singola volta. Le foto nuove compaiono comunque entro 30 secondi.
+let photosCache = { data: null, expiresAt: 0 };
+const PHOTOS_CACHE_MS = 30 * 1000;
 
 // Elenco dei file: solo metadati, niente contenuto (veloce)
 app.get('/api/photos', async (req, res) => {
@@ -197,6 +204,10 @@ app.get('/api/photos', async (req, res) => {
     const providedToken = req.get('X-Wedding-Token') || req.query.token;
     if (WEDDING_TOKEN && providedToken !== WEDDING_TOKEN) {
       return res.status(403).json({ error: 'Link non valido.' });
+    }
+
+    if (photosCache.data && Date.now() < photosCache.expiresAt) {
+      return res.json(photosCache.data);
     }
 
     const q = GOOGLE_DRIVE_FOLDER_ID
@@ -220,7 +231,10 @@ app.get('/api/photos', async (req, res) => {
       thumb: f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s400') : null,
     }));
 
-    res.json({ files });
+    const payload = { files };
+    photosCache = { data: payload, expiresAt: Date.now() + PHOTOS_CACHE_MS };
+
+    res.json(payload);
   } catch (err) {
     console.error('Errore galleria:', err);
     res.status(500).json({ error: 'Errore nel caricamento della galleria.' });
