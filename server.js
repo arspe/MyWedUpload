@@ -138,7 +138,7 @@ app.get('/oauth2callback', async (req, res) => {
 // ---------------------------------------------------------------------------
 // UPLOAD (usato dagli invitati dalla pagina pubblica, nessun login richiesto)
 // ---------------------------------------------------------------------------
-app.post('/api/upload', upload.array('files', 20), async (req, res) => {
+app.post('/api/upload', upload.array('files', 40), async (req, res) => {
   try {
     if (!currentRefreshToken) {
       return res.status(503).json({
@@ -221,7 +221,7 @@ app.get('/api/photos', async (req, res) => {
     const result = await drive.files.list({
       q,
       orderBy: 'createdTime desc',
-      pageSize: 60,
+      pageSize: 1000,
       fields: 'files(id, name, mimeType, createdTime, thumbnailLink, appProperties)',
     });
 
