@@ -23,6 +23,7 @@ const {
   GOOGLE_REFRESH_TOKEN,     // valorizzata DOPO il primo login admin (vedi /auth/login)
   WEDDING_TOKEN,            // token segreto passato dal QR code agli invitati
   ADMIN_SECRET,             // password per proteggere /auth/login
+  GALLERY_ADMIN_CODE,       // password separata per la "modalità sposi" nella galleria (cancella tutto)
   SESSION_SECRET,
   ALLOWED_ORIGIN,           // es: https://tuonome.github.io (l'indirizzo della pagina GitHub Pages)
 } = process.env;
@@ -154,11 +155,14 @@ app.post('/api/upload', upload.array('files', 20), async (req, res) => {
       return res.status(400).json({ error: 'Nessun file ricevuto.' });
     }
 
+    const uploaderId = (req.body.uploaderId || '').slice(0, 64) || 'sconosciuto';
+
     const uploaded = [];
     for (const file of req.files) {
       const fileMetadata = {
         name: `${Date.now()}_${file.originalname}`,
         parents: GOOGLE_DRIVE_FOLDER_ID ? [GOOGLE_DRIVE_FOLDER_ID] : undefined,
+        appProperties: { uploaderId },
       };
       const media = {
         mimeType: file.mimetype,
@@ -218,7 +222,7 @@ app.get('/api/photos', async (req, res) => {
       q,
       orderBy: 'createdTime desc',
       pageSize: 60,
-      fields: 'files(id, name, mimeType, createdTime, thumbnailLink)',
+      fields: 'files(id, name, mimeType, createdTime, thumbnailLink, appProperties)',
     });
 
     const files = (result.data.files || []).map((f) => ({
@@ -226,6 +230,7 @@ app.get('/api/photos', async (req, res) => {
       name: f.name,
       isVideo: (f.mimeType || '').startsWith('video/'),
       createdTime: f.createdTime,
+      uploaderId: (f.appProperties && f.appProperties.uploaderId) || null,
       // Miniatura già pronta usata da Drive, ridimensionata un po' più
       // grande del default (~220px) per stare bene nella griglia
       thumb: f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s400') : null,
@@ -291,6 +296,40 @@ app.get('/api/photos/:id/media', async (req, res) => {
   } catch (err) {
     console.error('Errore media:', err);
     res.status(404).end();
+  }
+});
+
+// Cancellazione DEFINITIVA di un file (non nel cestino: sparisce subito e
+// per sempre). Permessa solo a chi lo ha caricato (stesso uploaderId) o
+// agli sposi (GALLERY_ADMIN_CODE).
+app.delete('/api/photos/:id', async (req, res) => {
+  try {
+    if (!currentRefreshToken) return res.status(503).json({ error: 'Non collegato a Drive.' });
+
+    const providedToken = req.get('X-Wedding-Token') || req.query.token;
+    if (WEDDING_TOKEN && providedToken !== WEDDING_TOKEN) {
+      return res.status(403).json({ error: 'Link non valido.' });
+    }
+
+    const isAdmin = GALLERY_ADMIN_CODE && req.get('X-Admin-Secret') === GALLERY_ADMIN_CODE;
+
+    if (!isAdmin) {
+      const requesterUploaderId = (req.get('X-Uploader-Id') || '').slice(0, 64);
+      const meta = await drive.files.get({ fileId: req.params.id, fields: 'appProperties' });
+      const ownerUploaderId = (meta.data.appProperties && meta.data.appProperties.uploaderId) || null;
+
+      if (!requesterUploaderId || !ownerUploaderId || requesterUploaderId !== ownerUploaderId) {
+        return res.status(403).json({ error: 'Puoi cancellare solo le foto che hai caricato tu.' });
+      }
+    }
+
+    await drive.files.delete({ fileId: req.params.id });
+    photosCache = { data: null, expiresAt: 0 };
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Errore cancellazione:', err);
+    res.status(500).json({ error: 'Errore durante la cancellazione.' });
   }
 });
 
