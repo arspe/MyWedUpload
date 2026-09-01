@@ -175,7 +175,7 @@ app.post('/api/upload', upload.array('files', 40), async (req, res) => {
         fields: 'id, name',
       });
 
-      uploaded.push(driveRes.data.name);
+      uploaded.push({ id: driveRes.data.id, name: driveRes.data.name });
     }
 
     photosCache = { data: null, expiresAt: 0 };
