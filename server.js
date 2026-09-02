@@ -333,6 +333,17 @@ app.delete('/api/photos/:id', async (req, res) => {
   }
 });
 
+// Verifica immediata della password sposi (senza dover tentare una
+// cancellazione per scoprire se è sbagliata)
+app.get('/api/admin/verify', (req, res) => {
+  const providedToken = req.query.token;
+  if (WEDDING_TOKEN && providedToken !== WEDDING_TOKEN) {
+    return res.status(403).json({ valid: false });
+  }
+  const valid = !!GALLERY_ADMIN_CODE && req.get('X-Admin-Secret') === GALLERY_ADMIN_CODE;
+  res.json({ valid });
+});
+
 app.get('/health', (req, res) => {
   res.json({ ok: true, driveCollegato: !!currentRefreshToken });
 });
